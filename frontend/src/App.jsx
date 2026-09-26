@@ -177,6 +177,11 @@ export default function App() {
     if (isStreaming) return;
     setError(null);
 
+    // Extract completed previous messages for conversation history
+    const history = messages
+      .filter(m => !m.typing && m.content)
+      .map(m => ({ role: m.role, content: m.content }));
+
     // Add user message
     const userMsg = { id: Date.now(), role: 'user', content: question, time: timestamp() };
     // Add placeholder bot message (typing)
@@ -190,7 +195,7 @@ export default function App() {
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, history }),
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -245,7 +250,7 @@ export default function App() {
     } finally {
       setIsStreaming(false);
     }
-  }, [isStreaming]);
+  }, [isStreaming, messages]);
 
   return (
     <div className="app-shell">

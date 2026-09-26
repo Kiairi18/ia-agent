@@ -27,9 +27,10 @@ const TOP_K = 5; // number of chunks to retrieve
 // ── System prompt ─────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are a helpful and knowledgeable assistant specialized in answering questions about Dar Chaaben (دار شعبان الفهري), a coastal town in the Nabeul Governorate in Tunisia.
 
-Use ONLY the provided context to answer the user's question. Be accurate, friendly, and concise. If the context does not contain enough information to answer confidently, say so honestly. Do not make up information.
-
-Answer in the same language the user uses (Arabic or English or French).`;
+- You remember conversation history and personal information shared by the user (such as their name, preferences, or past messages).
+- For factual questions about Dar Chaaben, use the provided context chunks. Be accurate, friendly, and concise.
+- If the user asks a conversational question or refers to past context (e.g. "what is my name?"), use the conversation history to answer accurately.
+- Answer in the same language the user uses (Arabic, English, or French).`;
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -60,20 +61,24 @@ async function retrieveContext(collection, queryEmbedding) {
   return chunks;
 }
 
-function buildPrompt(context, question) {
+function buildPrompt(context, history = [], question) {
   const contextBlock = context
     .map((c, i) => `[Source ${i + 1}]\n${c.text}`)
     .join("\n\n");
 
-  return `${SYSTEM_PROMPT}
+  const historyBlock = (Array.isArray(history) ? history : [])
+    .slice(-10) // keep last 10 turns for memory
+    .map((msg) => `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`)
+    .join("\n");
 
---- CONTEXT ---
-${contextBlock}
---- END CONTEXT ---
+  let prompt = `${SYSTEM_PROMPT}\n\n--- KNOWLEDGE BASE CONTEXT ---\n${contextBlock}\n--- END CONTEXT ---`;
 
-User question: ${question}
+  if (historyBlock) {
+    prompt += `\n\n--- CONVERSATION HISTORY ---\n${historyBlock}\n--- END CONVERSATION HISTORY ---`;
+  }
 
-Answer:`;
+  prompt += `\n\nUser question: ${question}\nAnswer:`;
+  return prompt;
 }
 
 // ── Express app ───────────────────────────────────────────────
@@ -88,7 +93,7 @@ app.get("/health", (_req, res) => {
 
 // POST /chat  — SSE streaming
 app.post("/chat", async (req, res) => {
-  const { question } = req.body;
+  const { question, history } = req.body;
 
   if (!question || typeof question !== "string" || question.trim() === "") {
     return res.status(400).json({ error: "Missing or empty 'question' field." });
@@ -122,8 +127,8 @@ app.post("/chat", async (req, res) => {
       })),
     });
 
-    // 3. Build the full prompt
-    const fullPrompt = buildPrompt(contextChunks, question.trim());
+    // 3. Build the full prompt including history
+    const fullPrompt = buildPrompt(contextChunks, history, question.trim());
 
     // 4. Stream llama3 response
     sendEvent("status", { message: "Generating answer..." });
